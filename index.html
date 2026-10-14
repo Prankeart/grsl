@@ -11,11 +11,13 @@ h1{font-size:20px}h2{font-size:16px;margin:0 0 8px}
 label{display:block;margin:8px 0}input[type=range]{width:100%}
 button{background:var(--ac);color:#fff;border:0;border-radius:10px;padding:10px 16px;font-size:15px;margin:6px 6px 6px 0}
 canvas{width:100%;image-rendering:pixelated;background:#8883;border-radius:8px;display:block;margin:8px 0}
+#bar{height:16px;background:#8884;border-radius:8px;overflow:hidden;margin:6px 0}#bi{display:block;height:100%;width:0;background:var(--ac);transition:width .4s}
 small,p{opacity:.85}a{color:var(--ac)}
 </style></head><body>
 <h1>🔊 Ses ile Görsel Aktarımı</h1>
 <small>Her piksel rengi 16×16 renk düzleminde (x,y) bir değere, o da iki duyulamayan frekansa çevrilir. Aynı/yakın renkler tek simge + tekrar sayısıyla gider. Beyaz = (0,0).</small>
 <label>Frekans bandı (iki telefonda de aynı olmalı): <select id="bd"><option value="a" selected>Duyulabilir 2–5 kHz (önce bununla test et)</option><option value="m">Yüksek 14–17 kHz</option><option value="u">Ultrason 19–22 kHz</option></select></label>
+<label>Alıcı sıkılığı: bir tonun komşu tonlardan en az <b id="vk">5</b>× güçlü olması gerekir (yüksek = daha az hata, daha çok red)<input type="range" id="kk" min="1.5" max="30" step="0.5" value="5"></label>
 
 <section><h2>📤 Gönder</h2>
 <input type="file" id="f" accept="image/*">
@@ -29,6 +31,7 @@ small,p{opacity:.85}a{color:var(--ac)}
 <section><h2>📥 Al</h2>
 <button id="rec">📥 Dinle</button>
 <canvas id="rv" width="1" height="1"></canvas>
+<div id="bar"><i id="bi"></i></div>
 <p id="st">Hazır.</p><p id="lv"></p>
 <a id="dl" download="gorsel.png">PNG olarak indir</a></section>
 
@@ -66,7 +69,7 @@ function build(){
     cur.sy.push(...sy);pos+=len;i=j;tk++;
   }
   pk.push(cur);
-  const sec=pk.reduce((a,p)=>a+PRE+.3+(p.sy.length+6)*STEP+.6,0)*(+$('rp').value);
+  const sec=pk.reduce((a,p)=>a+PRE+.3+(p.sy.length+7)*STEP+.6,0)*(+$('rp').value);
   $('info').textContent=W+'×'+H+' piksel · '+tk+' grup · '+pk.length+' paket · tahmini süre '+(sec<90?Math.round(sec)+' sn':(sec/60).toFixed(1)+' dk');
 }
 function ac(){
@@ -90,7 +93,7 @@ function stopTx(){nodes.forEach(o=>{try{o.stop()}catch(e){}});nodes=[];clearTime
 /* paket: [w,h,ofsüst,ofsalt,n, ...simgeler, sağlama] */
 function pktSyms(p){
   const a=[W,H,p.off>>8,p.off&255,p.sy.length].map(b=>[b,0]).concat(p.sy);let ch=0;
-  a.forEach((s,i)=>ch+=((s[1]<<8)|s[0])*(i+1));a.push([ch&255,0]);return a;
+  a.forEach((s,i)=>ch+=((s[1]<<8)|s[0])*(i+1));let c2=0;a.forEach((s,i)=>c2+=((s[1]<<8)|s[0])*(i*i+7));a.push([ch&255,0],[c2%253,0]);return a;
 }
 $('send').onclick=()=>{
   if(nodes.length){stopTx();$('info').textContent='Gönderim durduruldu.';return}
@@ -117,6 +120,7 @@ $('tt').onclick=()=>{
   $('info').textContent='Test tonu çalıyor (6 sn). Alıcıda "test tonu" değeri +10 dB üstüne çıkmalı.';
   tm=setTimeout(()=>{nodes=[];$('send').textContent='📤 Gönder';$('info').textContent='Test tonu bitti.'},6000);
 };
+$('kk').oninput=()=>$('vk').textContent=$('kk').value;
 function stopRx(msg){
   if(!rx)return;clearInterval(rx.iv);
   try{rx.sp.onaudioprocess=null;rx.sp.disconnect();rx.stream.getTracks().forEach(t=>t.stop());rx.rc.close()}catch(e){}
@@ -140,7 +144,7 @@ $('rec').onclick=async()=>{
   for(let j=0;j<NT;j++){const q=j*TS/sr,ph=2*Math.PI*(BN.c0*q+(BN.c1-BN.c0)*q*q/(2*PRE));tc[j]=Math.cos(ph);ts[j]=Math.sin(ph);Ec+=tc[j]*tc[j]}
   const ncc=p=>{let a=0,b=0,e=0;for(let j=0;j<NT;j++){const x=buf[p+j*TS];a+=x*tc[j];b+=x*ts[j];e+=x*x}return Math.sqrt(a*a+b*b)/Math.sqrt(e*Ec+1e-12)};
   const gz=(a,e,f)=>{const w=2*Math.cos(2*Math.PI*f/sr);let s1=0,s2=0;for(let i=a;i<e;i++){const s=buf[i]+w*s1-s2;s2=s1;s1=s}return s1*s1+s2*s2-w*s1*s2};
-  let bestN=0,sp0=0,cand=null,pend=[],W2=0,H2=0,pix=null,got=null,cnt=0;
+  let nOk=0,nBad=0,bestN=0,sp0=0,cand=null,pend=[],W2=0,H2=0,pix=null,got=null,cnt=0;
   function scan(){
     while(sp0+L<=n){
       const v=ncc(sp0);if(v>bestN)bestN=v;
@@ -160,15 +164,15 @@ $('rec').onclick=async()=>{
       if(e>n)return null;
       const px=Array.from({length:16},(_,k)=>gz(a,e,XB(k))),py=Array.from({length:16},(_,k)=>gz(a,e,YB(k)));
       const mx=Math.max(...px),my=Math.max(...py);
-      return [(px.indexOf(mx)<<4)|py.indexOf(my),gz(a,e,BN.f)>.3*(mx+my)/2?1:0];
+      const sx=[...px].sort((u,t)=>t-u),sy=[...py].sort((u,t)=>t-u);return [(px.indexOf(mx)<<4)|py.indexOf(my),gz(a,e,BN.f)>.3*(mx+my)/2?1:0,Math.min(sx[0]/(sx[1]+1e-12),sy[0]/(sy[1]+1e-12))];
     };
     const s=[];
-    for(let i=0;i<5;i++){const q=sym(i);if(!q)return 'wait';s.push(q)}
+    const K=+$('kk').value;for(let i=0;i<5;i++){const q=sym(i);if(!q)return 'wait';if(q[2]<K)return 'bad';s.push(q)}
     const [w,h,oh,ol,m]=s.map(q=>q[0]);
     if(!w||!h||m<1||m>MAXN)return 'bad';
-    for(let i=5;i<m+6;i++){const q=sym(i);if(!q)return 'wait';s.push(q)}
+    for(let i=5;i<m+7;i++){const q=sym(i);if(!q)return 'wait';if(q[2]<K)return 'bad';s.push(q)}
     let ch=0;for(let i=0;i<m+5;i++)ch+=((s[i][1]<<8)|s[i][0])*(i+1);
-    if((ch&255)!==s[m+5][0])return 'bad';
+    let c2=0;for(let i=0;i<m+5;i++)c2+=((s[i][1]<<8)|s[i][0])*(i*i+7);if((ch&255)!==s[m+5][0]||c2%253!==s[m+6][0])return 'bad';
     if(w!==W2||h!==H2){W2=w;H2=h;pix=new Uint8Array(w*h);got=new Uint8Array(w*h);cnt=0}
     let pos=(oh<<8)|ol,i=5;
     while(i<m+5){
@@ -183,8 +187,9 @@ $('rec').onclick=async()=>{
     {const tn=Math.min(n,Math.round(.3*sr)),a0=n-tn;
     if(tn>1000){let q=0;for(let i=a0;i<n;i++)q+=buf[i]*buf[i];
       const pt=gz(a0,n,BN.f),rf=[-700,-500,500,700].map(d=>gz(a0,n,BN.f+d)).reduce((x,y)=>x+y,0)/4,db=10*Math.log10((pt+1e-12)/(rf+1e-12));
-      $('lv').textContent='Mikrofon '+(10*Math.log10(q/tn+1e-12)).toFixed(0)+' dB · test tonu '+(db>=0?'+':'')+db.toFixed(0)+' dB · chirp eşleşme %'+Math.round(bestN*100)}}
-    pend=pend.filter(fr=>tryFrame(fr)==='wait');
+      $('lv').textContent='Mikrofon '+(10*Math.log10(q/tn+1e-12)).toFixed(0)+' dB · test tonu '+(db>=0?'+':'')+db.toFixed(0)+' dB · chirp eşleşme %'+Math.round(bestN*100)+' · paket kabul '+nOk+' / red '+nBad}}
+    pend=pend.filter(fr=>{const r=tryFrame(fr);if(r==='ok')nOk++;if(r==='bad')nBad++;return r==='wait'});
+    $('bi').style.width=(W2?cnt*100/(W2*H2):0)+'%';
     $('st').textContent=W2?'Dinleniyor… %'+Math.round(cnt*100/(W2*H2))+' ('+cnt+'/'+W2*H2+' piksel)':'Dinleniyor… ön ek (chirp) bekleniyor';
     if(W2&&cnt===W2*H2){stopRx('Görsel tamamlandı ✓ ('+W2+'×'+H2+')');return}
     const k=Math.min(sp0,...pend.map(f=>f.s));
