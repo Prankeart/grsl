@@ -17,7 +17,7 @@ small,p{opacity:.85}a{color:var(--ac)}
 <h1>🔊 Ses ile Görsel Aktarımı</h1>
 <small>Her piksel rengi 16×16 renk düzleminde (x,y) bir değere, o da iki duyulamayan frekansa çevrilir. Aynı/yakın renkler tek simge + tekrar sayısıyla gider. Beyaz = (0,0).</small>
 <label>Frekans bandı (iki telefonda de aynı olmalı): <select id="bd"><option value="a" selected>Duyulabilir 2–5 kHz (önce bununla test et)</option><option value="m">Yüksek 14–17 kHz</option><option value="u">Ultrason 19–22 kHz</option></select></label>
-<label>Alıcı sıkılığı: bir tonun komşu tonlardan en az <b id="vk">5</b>× güçlü olması gerekir (yüksek = daha az hata, daha çok red)<input type="range" id="kk" min="1.5" max="30" step="0.5" value="5"></label>
+
 
 <section><h2>📤 Gönder</h2>
 <input type="file" id="f" accept="image/*">
@@ -38,7 +38,7 @@ small,p{opacity:.85}a{color:var(--ac)}
 <script>
 const $=i=>document.getElementById(i);
 const BANDS={a:{x:2000,y:3800,s:100,f:5600,c0:1800,c1:5800},m:{x:14000,y:15400,s:80,f:16800,c0:13800,c1:17000},u:{x:19000,y:20400,s:80,f:21800,c0:18800,c1:22000}};let BN=BANDS.a;
-const XB=x=>BN.x+x*BN.s,YB=y=>BN.y+y*BN.s,PRE=.5,TONE=.16,STEP=.25,MAXN=64,AC=window.AudioContext||window.webkitAudioContext;
+const XB=x=>BN.x+x*BN.s,YB=y=>BN.y+y*BN.s,PRE=.5,TONE=.16,STEP=.25,MAXN=40,AC=window.AudioContext||window.webkitAudioContext;
 let src=null,pk=[],W=0,H=0,uc=null,nodes=[],tm=null,rx=null;
 /* renk: 3-3-2 bit, ters çevrilmiş (beyaz=255-255=0 → x=0,y=0); bayt = x<<4 | y */
 const dec=c=>{const r=255-c;return [(r>>5)*255/7,((r>>2)&7)*255/7,(r&3)*85]};
@@ -120,7 +120,6 @@ $('tt').onclick=()=>{
   $('info').textContent='Test tonu çalıyor (6 sn). Alıcıda "test tonu" değeri +10 dB üstüne çıkmalı.';
   tm=setTimeout(()=>{nodes=[];$('send').textContent='📤 Gönder';$('info').textContent='Test tonu bitti.'},6000);
 };
-$('kk').oninput=()=>$('vk').textContent=$('kk').value;
 function stopRx(msg){
   if(!rx)return;clearInterval(rx.iv);
   try{rx.sp.onaudioprocess=null;rx.sp.disconnect();rx.stream.getTracks().forEach(t=>t.stop());rx.rc.close()}catch(e){}
@@ -144,7 +143,7 @@ $('rec').onclick=async()=>{
   for(let j=0;j<NT;j++){const q=j*TS/sr,ph=2*Math.PI*(BN.c0*q+(BN.c1-BN.c0)*q*q/(2*PRE));tc[j]=Math.cos(ph);ts[j]=Math.sin(ph);Ec+=tc[j]*tc[j]}
   const ncc=p=>{let a=0,b=0,e=0;for(let j=0;j<NT;j++){const x=buf[p+j*TS];a+=x*tc[j];b+=x*ts[j];e+=x*x}return Math.sqrt(a*a+b*b)/Math.sqrt(e*Ec+1e-12)};
   const gz=(a,e,f)=>{const w=2*Math.cos(2*Math.PI*f/sr);let s1=0,s2=0;for(let i=a;i<e;i++){const s=buf[i]+w*s1-s2;s2=s1;s1=s}return s1*s1+s2*s2-w*s1*s2};
-  let nOk=0,nBad=0,bestN=0,sp0=0,cand=null,pend=[],W2=0,H2=0,pix=null,got=null,cnt=0;
+  let lastQ=0,nOk=0,nBad=0,bestN=0,sp0=0,cand=null,pend=[],W2=0,H2=0,pix=null,got=null,cnt=0;
   function scan(){
     while(sp0+L<=n){
       const v=ncc(sp0);if(v>bestN)bestN=v;
@@ -158,6 +157,7 @@ $('rec').onclick=async()=>{
     for(let i=0;i<W2*H2;i++)d.data.set(got[i]?[...dec(pix[i]),255]:[128,128,128,255],i*4);
     g.putImageData(d,0,0);$('dl').href=c.toDataURL();
   }
+  const att={},chk=(S,m)=>{let a=0,b=0;for(let i=0;i<m+5;i++){const v=(S[i][1]<<8)|S[i][0];a+=v*(i+1);b+=v*(i*i+7)}return (a&255)===S[m+5][0]&&b%253===S[m+6][0]};
   function tryFrame(fr){
     const sym=i=>{
       const a=fr.s+Math.round((PRE+.3+i*STEP+TONE*.2)*sr),e=fr.s+Math.round((PRE+.3+i*STEP+TONE*.8)*sr);
@@ -167,17 +167,27 @@ $('rec').onclick=async()=>{
       const sx=[...px].sort((u,t)=>t-u),sy=[...py].sort((u,t)=>t-u);return [(px.indexOf(mx)<<4)|py.indexOf(my),gz(a,e,BN.f)>.3*(mx+my)/2?1:0,Math.min(sx[0]/(sx[1]+1e-12),sy[0]/(sy[1]+1e-12))];
     };
     const s=[];
-    const K=+$('kk').value;for(let i=0;i<5;i++){const q=sym(i);if(!q)return 'wait';if(q[2]<K)return 'bad';s.push(q)}
-    const [w,h,oh,ol,m]=s.map(q=>q[0]);
+    for(let i=0;i<5;i++){const q=sym(i);if(!q)return 'wait';s.push(q)}
+    let [w,h,oh,ol,m]=s.map(q=>q[0]);
     if(!w||!h||m<1||m>MAXN)return 'bad';
-    for(let i=5;i<m+7;i++){const q=sym(i);if(!q)return 'wait';if(q[2]<K)return 'bad';s.push(q)}
-    let ch=0;for(let i=0;i<m+5;i++)ch+=((s[i][1]<<8)|s[i][0])*(i+1);
-    let c2=0;for(let i=0;i<m+5;i++)c2+=((s[i][1]<<8)|s[i][0])*(i*i+7);if((ch&255)!==s[m+5][0]||c2%253!==s[m+6][0])return 'bad';
+    for(let i=5;i<m+7;i++){const q=sym(i);if(!q)return 'wait';s.push(q)}
+    
+    lastQ=s.map(q=>q[2]).sort((a,b)=>a-b)[s.length>>1];
+    let S=s;
+    if(!chk(S,m)){
+      /* bozuk paket: aynı paketin önceki tekrarlarıyla simge simge, ton netliğine göre oylama */
+      const key=((oh<<8)|ol)+':'+m,A=(att[key]=att[key]||[]);A.push(s);if(A.length>6)A.shift();
+      if(A.length<2)return 'bad';
+      S=A[0].map((_,i)=>{const sc={};A.forEach(a=>{const k=a[i][0]*2+a[i][1];sc[k]=(sc[k]||0)+Math.min(a[i][2],50)+1});const k=+Object.keys(sc).sort((x,y)=>sc[y]-sc[x])[0];return [k>>1,k&1]});
+      if(!chk(S,m))return 'bad';
+      delete att[key];
+    }
+    w=S[0][0];h=S[1][0];if(!w||!h)return 'bad';
     if(w!==W2||h!==H2){W2=w;H2=h;pix=new Uint8Array(w*h);got=new Uint8Array(w*h);cnt=0}
     let pos=(oh<<8)|ol,i=5;
     while(i<m+5){
-      const q=s[i];let run=1;
-      if(q[1]){if(i+1>=m+5)return 'bad';run=s[i+1][0]+1;i+=2}else i++;
+      const q=S[i];let run=1;
+      if(q[1]){if(i+1>=m+5)return 'bad';run=S[i+1][0]+1;i+=2}else i++;
       for(let k=0;k<run;k++,pos++)if(pos<w*h){if(!got[pos]){got[pos]=1;cnt++}pix[pos]=q[0]}
     }
     paint();return 'ok';
@@ -187,7 +197,7 @@ $('rec').onclick=async()=>{
     {const tn=Math.min(n,Math.round(.3*sr)),a0=n-tn;
     if(tn>1000){let q=0;for(let i=a0;i<n;i++)q+=buf[i]*buf[i];
       const pt=gz(a0,n,BN.f),rf=[-700,-500,500,700].map(d=>gz(a0,n,BN.f+d)).reduce((x,y)=>x+y,0)/4,db=10*Math.log10((pt+1e-12)/(rf+1e-12));
-      $('lv').textContent='Mikrofon '+(10*Math.log10(q/tn+1e-12)).toFixed(0)+' dB · test tonu '+(db>=0?'+':'')+db.toFixed(0)+' dB · chirp eşleşme %'+Math.round(bestN*100)+' · paket kabul '+nOk+' / red '+nBad}}
+      $('lv').textContent='Mikrofon '+(10*Math.log10(q/tn+1e-12)).toFixed(0)+' dB · test tonu '+(db>=0?'+':'')+db.toFixed(0)+' dB · chirp eşleşme %'+Math.round(bestN*100)+' · paket kabul '+nOk+' / red '+nBad+' · ton netliği '+Math.round(lastQ)+'×'}}
     pend=pend.filter(fr=>{const r=tryFrame(fr);if(r==='ok')nOk++;if(r==='bad')nBad++;return r==='wait'});
     $('bi').style.width=(W2?cnt*100/(W2*H2):0)+'%';
     $('st').textContent=W2?'Dinleniyor… %'+Math.round(cnt*100/(W2*H2))+' ('+cnt+'/'+W2*H2+' piksel)':'Dinleniyor… ön ek (chirp) bekleniyor';
